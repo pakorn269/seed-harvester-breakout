@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seed Harvester Breakout - A Superseed Game</title>
+    <style>
+        canvas {
+            border: 2px solid #4CAF50;
+            display: block;
+            margin: 0 auto;
+        }
+        body {
+            background-image: url('https://github.com/superseed-xyz/brand-kit/raw/main/logos-wordmarks/brand-in-use/brand-in-use-6.png');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            min-height: 100vh;
+        }
+        h1 {
+            color: #4CAF50;
+            text-align: center;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 10px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        #gameMessage {
+            color: #FFFFFF;
+            font-size: 18px;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 25px;
+            border-radius: 10px;
+            display: none;
+            max-width: 500px;
+            box-shadow: 0 0 20px rgba(76, 175, 80, 0.5);
+            border: 1px solid #4CAF50;
+            z-index: 1000; /* Add this to ensure it's always on top */
+        }
+        
+        #gameMessage h2 {
+            color: #4CAF50;
+            margin-top: 0;
+        }
+        
+        #gameMessage h3 {
+            color: #FFD700;
+            margin-bottom: 5px;
+        }
+        
+        #gameMessage button:hover {
+            transform: scale(1.05);
+            transition: transform 0.2s;
+        }
+        
+        .achievement-notification {
+            position: fixed;
+            top: -100px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            transform: translateY(-100px);
+            opacity: 0;
+            transition: transform 0.3s, opacity 0.3s;
+            z-index: 1000;
+            border: 2px solid #FFD700;
+        }
+    </style>
+</head>
+<body>
+    <h1>Seed Harvester Breakout</h1>
+    <canvas id="gameCanvas" width="850" height="600"></canvas>
+    <div id="gameMessage"></div>
+
+    <script>
+        // Get the canvas and context
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameMessage = document.getElementById('gameMessage');
+
+        // Load SuperseedXYZ branding assets
+        const profileImage = new Image();
+        profileImage.src = 'https://pbs.twimg.com/profile_images/1874884711790653440/c_y1WmIZ_400x400.jpg'; // Profile picture as ball
+        const blockImage = new Image();
+        blockImage.src = 'https://github.com/superseed-xyz/brand-kit/raw/main/logos-wordmarks/extra-wordmarks/black-bg.png'; // All block texture
+        const paddleImage = new Image();
+        paddleImage.src = 'https://github.com/superseed-xyz/brand-kit/raw/main/logos-wordmarks/extra-wordmarks/default.png'; // Paddle texture
+        const gameBackgroundImage = new Image();
+        gameBackgroundImage.src = 'https://github.com/superseed-xyz/brand-kit/raw/main/logos-wordmarks/brand-in-use/brand-in-use-4.png'; // Game background
+
+        // Sound effects (using free sounds from mixkit.co)
+        const bounceSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2617/2617-preview.mp3'); // Soft ping pong hit
+        const breakSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2654/2654-preview.mp3');  // Breaking block sound
+        const powerUpSound = new Audio('https://assets.mixkit.co/active_storage/sfx/270/270-preview.mp3');  // Power-up collection sound
+        const loseLifeSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2620/2620-preview.mp3'); // Ball miss sound
+
+        // Game variables
+        const paddleWidth = 100; 
+        const paddleHeight = 30;
+        let paddleX = (canvas.width - paddleWidth) / 2;
+        const paddleSpeed = 7;
+
+        const ballRadius = 15; 
+        let ballX = canvas.width / 2;
+        let ballY = canvas.height - 30;
+        let ballDX = 4;
+        let ballDY = -4;
+
+        const seedWidth = 80;
+        const seedHeight = 30;
+        const seedPadding = 10;
+        const seedOffsetTop = 30;
+        const seedOffsetLeft = 30;
+        const seedRowCount = 3;
+        const seedColumnCount = 9;
+        let seeds = [];
+        for (let c = 0; c < seedColumnCount; c++) {
+            seeds[c] = [];
+            for (let r = 0; r < seedRowCount; r++) {
+                seeds[c][r] = { x: 0, y: 0, status: 1 };
+            }
+        }
+
+        let lives = 3;
+        let score = 0;
+        let gameState = 'start'; // start, playing, gameOver, win
+        let powerUp = null;
+
+        // Add timer and game stats tracking
+        let gameTimer = 0;
+        let gameStartTime = 0;
+        let timerInterval = null;
+        let gameStatistics = {
+            blocksDestroyed: 0,
+            timeSpent: 0,
+            finalScore: 0,
+            levelUps: 0
+        };
+
+        // Add achievements to drive replay value
+        const achievements = [
+            { id: 'speedDemon', name: 'Speed Demon', description: 'Reach 200% ball speed', earned: false },
+            { id: 'perfectClear', name: 'Perfect Harvest', description: 'Clear all seeds without losing a life', earned: false },
+            { id: 'quickClear', name: 'Quick Harvester', description: 'Clear a level in under 30 seconds', earned: false },
+            { id: 'marathon', name: 'Marathon Player', description: 'Complete 3 consecutive level-ups', earned: false }
+        ];
+
+        function checkAchievements() {
+            // Calculate seedCount here rather than referencing an undefined variable
+            let seedCount = 0;
+            for (let c = 0; c < seedColumnCount; c++) {
+                for (let r = 0; r < seedRowCount; r++) {
+                    if (seeds[c][r].status === 1) {
+                        seedCount++;
+                    }
+                }
+            }
+            
+            // Speed Demon
+            const currentSpeed = Math.sqrt(ballDX * ballDX + ballDY * ballDY);
+            const originalSpeed = 4;
+            if (currentSpeed / originalSpeed >= 2 && !achievements[0].earned) {
+                achievements[0].earned = true;
+                showAchievementUnlock(achievements[0]);
+            }
+            
+            // Perfect Clear
+            if (seedCount === 0 && lives === 3 && !achievements[1].earned) {
+                achievements[1].earned = true;
+                showAchievementUnlock(achievements[1]);
+            }
+            
+            // Quick Clear
+            if (seedCount === 0 && gameTimer < 30 && !achievements[2].earned) {
+                achievements[2].earned = true;
+                showAchievementUnlock(achievements[2]);
+            }
+            
+            // Marathon Player - track level ups in gameStatistics
+            if (gameStatistics.levelUps >= 3 && !achievements[3].earned) {
+                achievements[3].earned = true;
+                showAchievementUnlock(achievements[3]);
+            }
+        }
+
+        function showAchievementUnlock(achievement) {
+            // Display achievement notification
+            const notification = document.createElement('div');
+            notification.className = 'achievement-notification';
+            notification.innerHTML = `
+                <h3>🏆 Achievement Unlocked!</h3>
+                <p>${achievement.name}</p>
+                <p>${achievement.description}</p>
+            `;
+            document.body.appendChild(notification);
+            
+            // Add animation
+            setTimeout(() => {
+                notification.style.transform = 'translateY(0)';
+                notification.style.opacity = '1';
+                
+                // Play achievement sound
+                const achievementSound = new Audio('https://assets.mixkit.co/active_storage/sfx/254/254-preview.mp3');
+                achievementSound.play();
+                
+                // Remove after display
+                setTimeout(() => {
+                    notification.style.transform = 'translateY(-100px)';
+                    notification.style.opacity = '0';
+                    setTimeout(() => notification.remove(), 500);
+                }, 3000);
+            }, 100);
+        }
+
+        // Paddle movement controls
+        let rightPressed = false;
+        let leftPressed = false;
+
+        document.addEventListener('keydown', keyDownHandler);
+        document.addEventListener('keyup', keyUpHandler);
+
+        // Update keyDownHandler to start timer when game starts
+        function keyDownHandler(e) {
+            if (e.key === 'Right' || e.key === 'ArrowRight') {
+                rightPressed = true;
+            } else if (e.key === 'Left' || e.key === 'ArrowLeft') {
+                leftPressed = true;
+            } else if (e.key === ' ' && (gameState === 'start' || gameState === 'gameOver' || gameState === 'win')) {
+                resetGame();
+                gameState = 'playing';
+                gameStartTime = Date.now();
+                gameMessage.style.display = 'none';
+            }
+        }
+
+        function keyUpHandler(e) {
+            if (e.key === 'Right' || e.key === 'ArrowRight') {
+                rightPressed = false;
+            } else if (e.key === 'Left' || e.key === 'ArrowLeft') {
+                leftPressed = false;
+            }
+        }
+
+        // Update the drawBackground function to add 50% fade
+        function drawBackground() {
+            if (gameBackgroundImage.complete) {
+                ctx.globalAlpha = 0.2; // Set opacity to 50%
+                ctx.drawImage(gameBackgroundImage, 0, 0, canvas.width, canvas.height);
+                ctx.globalAlpha = 1.0; // Reset opacity for other elements
+            } else {
+                ctx.fillStyle = '#1a1a1a'; // Fallback background
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        // Add a dynamic background that responds to gameplay
+        function createDynamicBackground() {
+            // A grid of particles that react to ball movement
+            const particleCount = 50;
+            const particles = [];
+            
+            for (let i = 0; i < particleCount; i++) {
+                particles.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    radius: Math.random() * 3 + 1,
+                    color: `rgba(${Math.floor(Math.random() * 100) + 155}, 255, ${Math.floor(Math.random() * 100) + 155}, 0.3)`,
+                    speedX: Math.random() * 0.5 - 0.25,
+                    speedY: Math.random() * 0.5 - 0.25
+                });
+            }
+            
+            return function drawDynamicBg() {
+                // Draw particles
+                particles.forEach(p => {
+                    // Move particle
+                    p.x += p.speedX;
+                    p.y += p.speedY;
+                    
+                    // Wrap around edges
+                    if (p.x < 0) p.x = canvas.width;
+                    if (p.x > canvas.width) p.x = 0;
+                    if (p.y < 0) p.y = canvas.height;
+                    if (p.y > canvas.height) p.y = 0;
+                    
+                    // Attract to ball if game is playing
+                    if (gameState === 'playing') {
+                        const dx = ballX - p.x;
+                        const dy = ballY - p.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < 100) {
+                            p.x += dx * 0.01;
+                            p.y += dy * 0.01;
+                        }
+                    }
+                    
+                    // Draw particle
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                    ctx.fillStyle = p.color;
+                    ctx.fill();
+                });
+            };
+        }
+
+        const drawDynamicBg = createDynamicBackground();
+
+        // Draw the paddle with Superseed extra-wordmark texture
+        function drawPaddle() {
+            // First draw a black background behind the paddle
+            ctx.beginPath();
+            ctx.rect(paddleX - 5, canvas.height - paddleHeight - 15, paddleWidth + 10, paddleHeight + 10);
+            ctx.fillStyle = 'black';
+            ctx.fill();
+            ctx.closePath();
+            
+            if (paddleImage.complete) {
+                ctx.drawImage(paddleImage, paddleX, canvas.height - paddleHeight - 10, paddleWidth, paddleHeight);
+            } else {
+                const gradient = ctx.createLinearGradient(paddleX, 0, paddleX + paddleWidth, 0);
+                gradient.addColorStop(0, '#4CAF50'); // Changed to green
+                gradient.addColorStop(1, '#2E7D32'); // Darker green
+                ctx.beginPath();
+                ctx.rect(paddleX, canvas.height - paddleHeight - 10, paddleWidth, paddleHeight);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                ctx.closePath();
+            }
+        }
+
+        // Draw the ball with Superseed logo
+        function drawBall() {
+            if (profileImage.complete) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2);
+                ctx.clip();
+                ctx.drawImage(profileImage, ballX - ballRadius, ballY - ballRadius, ballRadius * 2, ballRadius * 2);
+                ctx.restore();
+            } else {
+                ctx.beginPath();
+                ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2);
+                ctx.fillStyle = '#FFD700'; // Fallback color
+                ctx.fill();
+                ctx.closePath();
+            }
+        }
+
+        // Draw the seeds with Superseed black-bg texture
+        function drawSeeds() {
+            for (let c = 0; c < seedColumnCount; c++) {
+                for (let r = 0; r < seedRowCount; r++) {
+                    if (seeds[c][r].status === 1) {
+                        let seedX = (c * (seedWidth + seedPadding)) + seedOffsetLeft;
+                        let seedY = (r * (seedHeight + seedPadding)) + seedOffsetTop;
+                        seeds[c][r].x = seedX;
+                        seeds[c][r].y = seedY;
+
+                        if (blockImage.complete) {
+                            ctx.save();
+                            ctx.beginPath();
+                            ctx.rect(seedX, seedY, seedWidth, seedHeight);
+                            ctx.clip();
+                            ctx.drawImage(blockImage, seedX, seedY, seedWidth, seedHeight);
+                            ctx.restore();
+                        } else {
+                            const gradient = ctx.createLinearGradient(seedX, seedY, seedX, seedY + seedHeight);
+                            gradient.addColorStop(0, '#4CAF50');
+                            gradient.addColorStop(1, '#2E7D32');
+                            ctx.beginPath();
+                            ctx.rect(seedX, seedY, seedWidth, seedHeight);
+                            ctx.fillStyle = gradient;
+                            ctx.fill();
+                            ctx.closePath();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Draw UI elements
+        function drawUI() {
+            // Display lives as hearts
+            ctx.font = '16px Arial';
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillText('Lives: ', canvas.width - 105, 20);
+            
+            // Draw hearts
+            for (let i = 0; i < lives; i++) {
+                ctx.fillText('❤️', canvas.width - 60 + (i * 20), 20);
+            }
+            
+            // Display score
+            ctx.fillText('Score: ' + score, 10, 20);
+            
+            // Display timer
+            if (gameState === 'playing') {
+                const elapsedTime = Math.floor((Date.now() - gameStartTime) / 1000);
+                gameTimer = elapsedTime;
+                ctx.fillText('Time: ' + formatTime(gameTimer), canvas.width / 1 - 240, 20);
+                
+                // Calculate and display ball speed as percentage of original
+                const originalSpeed = 4; // Starting speed
+                const currentSpeed = Math.sqrt(ballDX * ballDX + ballDY * ballDY);
+                const speedPercent = Math.floor((currentSpeed / originalSpeed) * 100);
+                
+                ctx.fillText('Ball Speed: ' + speedPercent + '%', canvas.width / 2 - 270, 20);
+            } else if (gameState === 'start') {
+                ctx.fillText('Time: 00:00', canvas.width / 2 - 40, 20);
+            }
+        }
+
+        // Helper function to format time as MM:SS
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+        }
+
+        // Add advanced power-ups based on player skill
+        function spawnPowerUp(seedX, seedY) {
+            // Base chance on recent accuracy - better players get more useful power-ups
+            const powerUpType = Math.random();
+            
+            if (Math.random() < 0.25) {
+                let type;
+                if (powerUpType > 0.7) {
+                    type = 'multiball'; // Release additional balls
+                } else if (powerUpType > 0.5) {
+                    type = 'extendPaddle'; // Widen paddle
+                } else if (powerUpType > 0.3) {
+                    type = 'slowBall'; // Slow down ball temporarily
+                } else {
+                    type = 'shield'; // Add bottom shield temporarily
+                }
+                
+                powerUp = {
+                    x: seedX + seedWidth / 2,
+                    y: seedY,
+                    width: 30,
+                    height: 30,
+                    type: type,
+                    dy: 1.5,
+                    active: true
+                };
+            }
+        }
+
+        // Enhanced drawPowerUp function
+        function drawPowerUp() {
+            if (powerUp && powerUp.active) {
+                // Add a glowing effect
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = '#FFD700';
+                
+                // Create a gradient for the power-up
+                const gradient = ctx.createLinearGradient(
+                    powerUp.x - powerUp.width/2, 
+                    powerUp.y, 
+                    powerUp.x + powerUp.width/2, 
+                    powerUp.y + powerUp.height
+                );
+                gradient.addColorStop(0, '#4CAF50');  // Green
+                gradient.addColorStop(1, '#FFD700');  // Gold
+                
+                // Draw the power-up with rounded corners for better visibility
+                ctx.beginPath();
+                ctx.roundRect(
+                    powerUp.x - powerUp.width/2, 
+                    powerUp.y, 
+                    powerUp.width, 
+                    powerUp.height,
+                    8 // Corner radius
+                );
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                
+                // Add a more visible "P" text
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = 'bold 16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('P', powerUp.x, powerUp.y + powerUp.height/2 + 5);
+                ctx.textAlign = 'start'; // Reset alignment for other text
+                
+                // Reset shadow
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        function updatePowerUp() {
+            if (powerUp && powerUp.active) {
+                powerUp.y += powerUp.dy;
+                
+                // Check collision with paddle - improved detection
+                if (
+                    powerUp.y + powerUp.height > canvas.height - paddleHeight - 10 &&
+                    powerUp.y < canvas.height - 10 &&
+                    powerUp.x + powerUp.width/2 > paddleX &&
+                    powerUp.x - powerUp.width/2 < paddleX + paddleWidth
+                ) {
+                    // Store original paddle width for reference
+                    const originalWidth = paddleWidth;
+                    
+                    // Extend paddle
+                    paddleWidth = 150;
+                    
+                    // Play sound
+                    powerUpSound.play();
+                    
+                    // Clear the power-up immediately to avoid multiple collisions
+                    const currentPowerUp = powerUp; // Store reference before nullifying
+                    powerUp = null;
+                    
+                    // Visual feedback without using global alpha (which affects rendering)
+                    let flashCount = 0;
+                    const flashPaddle = () => {
+                        // Flash the paddle border instead of changing global alpha
+                        let borderColor = (flashCount % 2 === 0) ? '#FFD700' : '#FFFFFF';
+                        
+                        // Store the original draw function temporarily
+                        const originalDrawPaddle = drawPaddle;
+                        
+                        // Override with flashing version
+                        drawPaddle = function() {
+                            // First draw a colored background behind the paddle
+                            ctx.beginPath();
+                            ctx.rect(paddleX - 5, canvas.height - paddleHeight - 15, paddleWidth + 10, paddleHeight + 10);
+                            ctx.fillStyle = borderColor;
+                            ctx.fill();
+                            ctx.closePath();
+                            
+                            // Draw the normal paddle on top
+                            if (paddleImage.complete) {
+                                ctx.drawImage(paddleImage, paddleX, canvas.height - paddleHeight - 10, paddleWidth, paddleHeight);
+                            } else {
+                                const gradient = ctx.createLinearGradient(paddleX, 0, paddleX + paddleWidth, 0);
+                                gradient.addColorStop(0, '#4CAF50');
+                                gradient.addColorStop(1, '#2E7D32');
+                                ctx.beginPath();
+                                ctx.rect(paddleX, canvas.height - paddleHeight - 10, paddleWidth, paddleHeight);
+                                ctx.fillStyle = gradient;
+                                ctx.fill();
+                                ctx.closePath();
+                            }
+                        };
+                        
+                        flashCount++;
+                        if (flashCount >= 6) {
+                            clearInterval(flashInterval);
+                            // Restore original draw function
+                            drawPaddle = originalDrawPaddle;
+                        }
+                    };
+                    
+                    const flashInterval = setInterval(flashPaddle, 100);
+                    
+                    // Reset after 10 seconds
+                    setTimeout(() => {
+                        paddleWidth = originalWidth;
+                    }, 10000);
+                } else if (powerUp.y > canvas.height) {
+                    powerUp = null; // Remove if missed
+                }
+            }
+        }
+
+        // Update the collision detection function to add speed boosts
+        function collisionDetection() {
+            for (let c = 0; c < seedColumnCount; c++) {
+                for (let r = 0; r < seedRowCount; r++) {
+                    let seed = seeds[c][r];
+                    if (seed.status === 1) {
+                        // Calculate the closest point from the circle to the rectangle
+                        let closestX = Math.max(seed.x, Math.min(ballX, seed.x + seedWidth));
+                        let closestY = Math.max(seed.y, Math.min(ballY, seed.y + seedHeight));
+                        
+                        // Calculate the distance between the circle's center and the closest point
+                        let distanceX = ballX - closestX;
+                        let distanceY = ballY - closestY;
+                        let distanceSquared = (distanceX * distanceX) + (distanceY * distanceY);
+                        
+                        // Check if the distance is less than the circle's radius
+                        if (distanceSquared < (ballRadius * ballRadius)) {
+                            // Determine which side of the block was hit
+                            let dx = closestX - ballX;
+                            let dy = closestY - ballY;
+                            
+                            // Reflect ball based on which side was hit
+                            if (Math.abs(dx) > Math.abs(dy)) {
+                                ballDX = -ballDX; // Hit left or right side
+                            } else {
+                                ballDY = -ballDY; // Hit top or bottom
+                            }
+                            
+                            // Mark the seed as broken
+                            seed.status = 0;
+                            score += 10;
+                            gameStatistics.blocksDestroyed++;
+                            breakSound.play();
+                            
+                            // 40% chance to increase ball speed
+                            if (Math.random() < 0.4) {
+                                // Random speed increase between 1-9%
+                                const speedIncrease = 1 + (Math.random() * 0.09 + 0.01);
+                                
+                                // Increase ball speed (both horizontal and vertical)
+                                ballDX *= speedIncrease;
+                                ballDY *= speedIncrease;
+                                
+                                // Visual feedback for speed boost
+                                showSpeedBoost();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add a function to show visual feedback when ball speed increases
+        function showSpeedBoost() {
+            // Visual effect - flash the ball
+            const originalDrawBall = drawBall;
+            let flashCount = 0;
+            
+            // Override the ball drawing function to flash
+            drawBall = function() {
+                if (profileImage.complete) {
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(ballX, ballY, ballRadius * (flashCount % 2 === 0 ? 1.3 : 1), 0, Math.PI * 2);
+                    ctx.clip();
+                    ctx.drawImage(profileImage, ballX - ballRadius * 1.3, ballY - ballRadius * 1.3, 
+                                  ballRadius * 2.6, ballRadius * 2.6);
+                    ctx.restore();
+                    
+                    // Add a speed trail
+                    ctx.beginPath();
+                    ctx.arc(ballX, ballY, ballRadius * 1.5, 0, Math.PI * 2);
+                    const gradient = ctx.createRadialGradient(
+                        ballX, ballY, ballRadius,
+                        ballX, ballY, ballRadius * 1.5
+                    );
+                    gradient.addColorStop(0, 'rgba(255, 215, 0, 0.6)'); // Gold
+                    gradient.addColorStop(1, 'rgba(255, 215, 0, 0)');
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(ballX, ballY, ballRadius * (flashCount % 2 === 0 ? 1.3 : 1), 0, Math.PI * 2);
+                    ctx.fillStyle = flashCount % 2 === 0 ? '#FFA500' : '#FFD700'; // Orange/Gold
+                    ctx.fill();
+                    ctx.closePath();
+                }
+            };
+            
+            // Flash the ball a few times
+            const flashInterval = setInterval(() => {
+                flashCount++;
+                if (flashCount >= 6) {
+                    clearInterval(flashInterval);
+                    drawBall = originalDrawBall;
+                }
+            }, 100);
+            
+            // Show speed increase text
+            ctx.save();
+            ctx.font = 'bold 16px Arial';
+            ctx.fillStyle = '#FFD700';
+            ctx.textAlign = 'center';
+            ctx.fillText('SPEED +', ballX, ballY - ballRadius - 10);
+            ctx.restore();
+            
+            // Play a special sound for speed boost
+            powerUpSound.play();
+        }
+
+        // Update checkWin function to display game summary and level up option
+        function checkWin() {
+            let seedCount = 0;
+            for (let c = 0; c < seedColumnCount; c++) {
+                for (let r = 0; r < seedRowCount; r++) {
+                    if (seeds[c][r].status === 1) {
+                        seedCount++;
+                    }
+                }
+            }
+            
+            if (seedCount === 0) {
+                gameState = 'win';
+                
+                // Save game statistics
+                gameStatistics.timeSpent = gameTimer;
+                gameStatistics.finalScore = score;
+                
+                // Display game summary with buttons
+                gameMessage.style.display = 'block';
+                gameMessage.innerHTML = `
+                    <h2>You Harvested All Seeds!</h2>
+                    <div>Score: ${score}</div>
+                    <div>Time: ${formatTime(gameTimer)}</div>
+                    <div>Blocks Destroyed: ${gameStatistics.blocksDestroyed}</div>
+                    <div style="margin-top: 20px;">
+                        <button id="levelUpButton" style="padding: 10px 20px; margin-right: 10px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">Level Up</button>
+                        <button id="finishButton" style="padding: 10px 20px; background-color: #FFD700; color: black; border: none; border-radius: 5px; cursor: pointer;">Finish Game</button>
+                    </div>
+                `;
+                
+                // Add event listeners to the buttons
+                setTimeout(() => {
+                    document.getElementById('levelUpButton').addEventListener('click', () => {
+                        levelUp();
+                    });
+                    
+                    document.getElementById('finishButton').addEventListener('click', () => {
+                        showFinalSummary();
+                    });
+                }, 100);
+            }
+        }
+
+        // Function to level up - increase ball speed
+        function levelUp() {
+            // Increase ball speed by 25%
+            ballDX *= 1.25;
+            ballDY *= 1.25;
+            
+            // Reset the game but keep the score and timer
+            const currentScore = score;
+            const currentGameTimer = gameTimer;
+            const currentBlocksDestroyed = gameStatistics.blocksDestroyed;
+            const currentLevelUps = gameStatistics.levelUps + 1; // Increment level ups
+            
+            resetGame();
+            
+            // Restore score and timer and update level ups
+            score = currentScore;
+            gameStartTime = Date.now() - (currentGameTimer * 1000);
+            gameStatistics.blocksDestroyed = currentBlocksDestroyed;
+            gameStatistics.levelUps = currentLevelUps;
+            
+            // Hide game message and continue playing
+            gameState = 'playing';
+            gameMessage.style.display = 'none';
+        }
+
+        // Function to show final game summary
+        function showFinalSummary() {
+            gameMessage.innerHTML = `
+                <h2>Game Complete!</h2>
+                <div>Final Score: ${gameStatistics.finalScore}</div>
+                <div>Total Time: ${formatTime(gameStatistics.timeSpent)}</div>
+                <div>Blocks Destroyed: ${gameStatistics.blocksDestroyed}</div>
+                <div style="margin-top: 20px;">
+                    <button id="twitterShareButton" style="padding: 10px 20px; margin-right: 10px; background-color: #1DA1F2; color: white; border: none; border-radius: 5px; cursor: pointer;">Share on Twitter</button>
+                    <button id="newGameButton" style="padding: 10px 20px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">New Game</button>
+                </div>
+            `;
+            
+            // Add event listeners for both buttons
+            setTimeout(() => {
+                document.getElementById('twitterShareButton').addEventListener('click', () => {
+                    shareOnTwitter();
+                });
+                
+                document.getElementById('newGameButton').addEventListener('click', () => {
+                    resetGame();
+                    gameState = 'start';
+                    showWelcomeScreen();
+                });
+            }, 100);
+        }
+
+        // Update the shareOnTwitter function with the new message format
+        function shareOnTwitter() {
+            const tweetText = `I harvested ${gameStatistics.blocksDestroyed} seeds and scored ${gameStatistics.finalScore} in Seed Harvester Breakout by @SuperseedXYZ! 🚜 Try it yourself: https://t.co/N6CqLMO64w #SuperseedXYZ #Grok3 #SuperseedBreakout`;
+            const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
+            window.open(twitterUrl, '_blank');
+        }
+
+        // Update resetGame function to ensure ball moves upward at start
+        function resetGame() {
+            lives = 3;
+            score = 0;
+            paddleX = (canvas.width - paddleWidth) / 2;
+            ballX = canvas.width / 2;
+            ballY = canvas.height - paddleHeight - 30; // Position above paddle
+            ballDX = 4 * (Math.random() > 0.5 ? 1 : -1); // Random horizontal direction
+            ballDY = -4; // Always move upward at start
+            powerUp = null;
+            gameTimer = 0;
+            gameStartTime = Date.now();
+            gameStatistics = {
+                blocksDestroyed: 0,
+                timeSpent: 0,
+                finalScore: 0,
+                levelUps: 0
+            };
+            seeds = [];
+            for (let c = 0; c < seedColumnCount; c++) {
+                seeds[c] = [];
+                for (let r = 0; r < seedRowCount; r++) {
+                    seeds[c][r] = { x: 0, y: 0, status: 1 };
+                }
+            }
+        }
+
+        // Add different types of seeds with unique behaviors
+        function createSeeds() {
+            for (let c = 0; c < seedColumnCount; c++) {
+                seeds[c] = [];
+                for (let r = 0; r < seedRowCount; r++) {
+                    // Random seed type: normal, hard, explosive, or prize
+                    const seedType = Math.random();
+                    let type = 'normal';
+                    let hitPoints = 1;
+                    
+                    if (seedType > 0.85) {
+                        type = 'prize'; // Extra points
+                    } else if (seedType > 0.7) {
+                        type = 'explosive'; // Destroys adjacent seeds
+                    } else if (seedType > 0.5) {
+                        type = 'hard'; // Takes 2 hits
+                        hitPoints = 2;
+                    }
+                    
+                    seeds[c][r] = { x: 0, y: 0, status: 1, type, hitPoints };
+                }
+            }
+        }
+
+        // Add a visualizer for game sounds to enhance the experience
+        function createAudioVisualizer() {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const analyser = audioContext.createAnalyser();
+            
+            // Connect our game sounds to the analyzer
+            const connectSound = (sound) => {
+                const source = audioContext.createMediaElementSource(sound);
+                source.connect(analyser);
+                analyser.connect(audioContext.destination);
+            };
+            
+            // Connect all game sounds
+            connectSound(bounceSound);
+            connectSound(breakSound);
+            connectSound(powerUpSound);
+            connectSound(loseLifeSound);
+            
+            // Setup analyzer
+            analyser.fftSize = 32;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            
+            // Return a drawing function
+            return function drawVisualizer() {
+                if (gameState === 'playing') {
+                    analyser.getByteFrequencyData(dataArray);
+                    
+                    const barWidth = canvas.width / bufferLength;
+                    let x = 0;
+                    
+                    for (let i = 0; i < bufferLength; i++) {
+                        const barHeight = dataArray[i] / 4;
+                        
+                        ctx.fillStyle = `hsla(${i * 10}, 100%, 50%, 0.3)`;
+                        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+                        
+                        x += barWidth;
+                    }
+                }
+            };
+        }
+
+        // Add mouse/touch controls for the paddle
+        function setupMouseControls() {
+            // Mouse movement - only allow paddle movement during gameplay
+            canvas.addEventListener('mousemove', function(e) {
+                if (gameState === 'playing') {  // Only move paddle when game is playing
+                    const mouseX = e.clientX - canvas.getBoundingClientRect().left;
+                    // Position paddle centered on mouse position
+                    paddleX = mouseX - (paddleWidth / 2);
+                    
+                    // Keep paddle within bounds
+                    if (paddleX < 0) {
+                        paddleX = 0;
+                    } else if (paddleX > canvas.width - paddleWidth) {
+                        paddleX = canvas.width - paddleWidth;
+                    }
+                }
+            });
+            
+            // Mouse click to start game
+            canvas.addEventListener('click', function() {
+                if (gameState === 'start' || gameState === 'gameOver' || gameState === 'win') {
+                    resetGame();
+                    gameState = 'playing';
+                    gameStartTime = Date.now();
+                    gameMessage.style.display = 'none';
+                }
+            });
+        }
+
+        // Call this after defining the function
+        setupMouseControls();
+
+        // Fix the showWelcomeScreen function to properly handle the Start Game button
+        function showWelcomeScreen() {
+            gameMessage.style.display = 'block';
+            gameMessage.innerHTML = `
+                <h2>Welcome to Seed Harvester Breakout!</h2>
+                
+                <div style="text-align: left; margin-bottom: 15px;">
+                    <h3>How to Play:</h3>
+                    <ul style="padding-left: 20px;">
+                        <li>Move the paddle with mouse or arrow keys</li>
+                        <li>Break all the seed blocks to win</li>
+                        <li>Don't let the ball fall out of bounds</li>
+                        <li>Breaking blocks has a 40% chance to increase ball speed</li>
+                    </ul>
+                    
+                    <h3>Controls:</h3>
+                    <ul style="padding-left: 20px;">
+                        <li>Mouse: Move paddle, click to start</li>
+                        <li>Arrow Keys: Move paddle left/right</li>
+                        <li>Spacebar: Start/restart game</li>
+                    </ul>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <button id="startGameButton" style="padding: 12px 24px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 18px; position: relative; z-index: 1001;">START GAME</button>
+                </div>
+            `;
+            
+            // Add a direct event listener to the button with a small delay to ensure it exists
+            setTimeout(() => {
+                const startButton = document.getElementById('startGameButton');
+                if (startButton) {
+                    // Remove any existing listeners first
+                    const newButton = startButton.cloneNode(true);
+                    startButton.parentNode.replaceChild(newButton, startButton);
+                    
+                    // Add the new listener
+                    newButton.addEventListener('click', function(e) {
+                        e.stopPropagation(); // Stop event bubbling
+                        resetGame();
+                        gameState = 'playing';
+                        gameStartTime = Date.now();
+                        gameMessage.style.display = 'none';
+                    });
+                }
+            }, 50);
+        }
+
+        // Update the draw function with complete collision logic
+        function draw() {
+            // Clear canvas and draw background
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawBackground();
+            drawDynamicBg();
+
+            // Handle different game states
+            if (gameState === 'start') {
+                // Show the welcome screen
+                showWelcomeScreen();
+            } else if (gameState === 'playing') {
+                gameMessage.style.display = 'none';
+                
+                // Move paddle based on keyboard input - ONLY when playing
+                if (rightPressed && paddleX < canvas.width - paddleWidth) {
+                    paddleX += paddleSpeed;
+                } else if (leftPressed && paddleX > 0) {
+                    paddleX -= paddleSpeed;
+                }
+                
+                // Draw game elements
+                drawPaddle();
+                drawBall();
+                drawSeeds();
+                drawPowerUp();
+                drawUI();
+                
+                // Game logic
+                collisionDetection();
+                updatePowerUp();
+                checkWin();
+                checkAchievements();
+
+                // Ball wall collisions
+                if (ballX + ballDX > canvas.width - ballRadius || ballX + ballDX < ballRadius) {
+                    ballDX = -ballDX;
+                    bounceSound.play();
+                }
+                
+                if (ballY + ballDY < ballRadius) {
+                    ballDY = -ballDY;
+                    bounceSound.play();
+                } 
+                // Ball paddle collision
+                else if (ballY + ballRadius > canvas.height - paddleHeight - 10 && 
+                         ballY + ballDY < canvas.height && 
+                         ballX > paddleX && 
+                         ballX < paddleX + paddleWidth) {
+                    
+                    // Adjust angle based on where ball hits paddle
+                    const hitPosition = (ballX - paddleX) / paddleWidth;
+                    const angleMultiplier = 2 * (hitPosition - 0.5);
+                    
+                    const speed = Math.sqrt(ballDX * ballDX + ballDY * ballDY);
+                    ballDX = speed * angleMultiplier * 0.8;
+                    ballDY = -Math.abs(ballDY);
+                    
+                    bounceSound.play();
+                }
+                // Ball falls below screen - lose life
+                else if (ballY + ballDY > canvas.height - ballRadius) {
+                    lives--;
+                    loseLifeSound.play();
+                    
+                    if (lives === 0) {
+                        gameState = 'gameOver';
+                        
+                        // Save game statistics
+                        gameStatistics.timeSpent = gameTimer;
+                        gameStatistics.finalScore = score;
+                        
+                        // Show game over summary
+                        gameMessage.style.display = 'block';
+                        gameMessage.innerHTML = `
+                            <h2>Game Over!</h2>
+                            <div>Score: ${score}</div>
+                            <div>Time: ${formatTime(gameTimer)}</div>
+                            <div>Blocks Destroyed: ${gameStatistics.blocksDestroyed}</div>
+                            <div style="margin-top: 20px;">
+                                <button id="twitterShareButton" style="padding: 10px 20px; margin-right: 10px; background-color: #1DA1F2; color: white; border: none; border-radius: 5px; cursor: pointer;">Share on Twitter</button>
+                                <button id="newGameButton" style="padding: 10px 20px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">New Game</button>
+                            </div>
+                        `;
+                        
+                        // Add event listeners
+                        setTimeout(() => {
+                            document.getElementById('twitterShareButton').addEventListener('click', () => {
+                                shareOnTwitter();
+                            });
+                            
+                            document.getElementById('newGameButton').addEventListener('click', () => {
+                                resetGame();
+                                gameState = 'start';
+                                showWelcomeScreen();
+                            });
+                        }, 100);
+                    } else {
+                        // Pause briefly
+                        gameState = 'paused';
+                        gameMessage.style.display = 'block';
+                        gameMessage.innerHTML = `${lives} ❤️ Left<br>Get Ready!`;
+                        
+                        // Reset ball position
+                        ballX = canvas.width / 2;
+                        ballY = canvas.height - 30;
+                        ballDX = 4 * (Math.random() > 0.5 ? 1 : -1);
+                        ballDY = -4;
+                        paddleX = (canvas.width - paddleWidth) / 2;
+                        
+                        // Resume after short delay
+                        setTimeout(() => {
+                            gameState = 'playing';
+                            gameMessage.style.display = 'none';
+                        }, 1500);
+                    }
+                }
+                
+                // Update ball position if game is active
+                if (gameState === 'playing') {
+                    ballX += ballDX;
+                    ballY += ballDY;
+                }
+            } else if (gameState === 'paused') {
+                // Draw current state but don't update positions
+                drawPaddle();
+                drawBall();
+                drawSeeds();
+                drawUI();
+            } else if (gameState === 'gameOver' || gameState === 'win') {
+                // Draw final state
+                drawPaddle();
+                drawBall();
+                drawSeeds();
+                drawUI();
+            }
+
+            // Continue the game loop
+            requestAnimationFrame(draw);
+        }
+
+        // Start the game loop
+        draw();
+    </script>
+</body>
+</html>
