@@ -79,7 +79,7 @@
     </style>
 </head>
 <body>
-    <h1>Seed Harvester Breakout</h1>
+    <h1>SuperSeed XYZ Harvester Breakout</h1>
     <canvas id="gameCanvas" width="850" height="600"></canvas>
     <div id="gameMessage"></div>
 
@@ -109,13 +109,17 @@
         const paddleWidth = 100; 
         const paddleHeight = 30;
         let paddleX = (canvas.width - paddleWidth) / 2;
+        let previousPaddleX = paddleX; // Track previous paddle position for shadow effect
         const paddleSpeed = 7;
 
         const ballRadius = 15; 
         let ballX = canvas.width / 2;
         let ballY = canvas.height - 30;
+        let previousBallX = ballX; // Track previous ball position for shadow effect
+        let previousBallY = ballY;
         let ballDX = 4;
         let ballDY = -4;
+        let ballSpeed = 4; // Base speed to track percentage increases
 
         const seedWidth = 80;
         const seedHeight = 30;
@@ -316,8 +320,26 @@
 
         const drawDynamicBg = createDynamicBackground();
 
-        // Draw the paddle with Superseed extra-wordmark texture
+        // Enhanced drawPaddle function with shadow effect
         function drawPaddle() {
+            // Draw shadow based on movement direction
+            if (Math.abs(paddleX - previousPaddleX) > 0.5) {
+                const shadowOffset = Math.min(10, Math.abs(paddleX - previousPaddleX));
+                const shadowDirection = paddleX > previousPaddleX ? -1 : 1;
+                
+                // Draw shadow
+                ctx.beginPath();
+                ctx.rect(
+                    paddleX + (shadowDirection * shadowOffset) - 5, 
+                    canvas.height - paddleHeight - 15, 
+                    paddleWidth + 10, 
+                    paddleHeight + 10
+                );
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.fill();
+                ctx.closePath();
+            }
+            
             // First draw a black background behind the paddle
             ctx.beginPath();
             ctx.rect(paddleX - 5, canvas.height - paddleHeight - 15, paddleWidth + 10, paddleHeight + 10);
@@ -337,10 +359,38 @@
                 ctx.fill();
                 ctx.closePath();
             }
+            
+            // Store current position for next frame's shadow
+            previousPaddleX = paddleX;
         }
 
-        // Draw the ball with Superseed logo
+        // Enhanced drawBall function with shadow/trail effect
         function drawBall() {
+            // Calculate the distance moved since last frame
+            const distanceMoved = Math.sqrt(
+                Math.pow(ballX - previousBallX, 2) + 
+                Math.pow(ballY - previousBallY, 2)
+            );
+            
+            // Draw shadow/trail based on movement
+            if (distanceMoved > 1) {
+                // Create a motion blur effect with multiple shadows
+                const trailCount = Math.min(3, Math.floor(distanceMoved / 2));
+                for (let i = 1; i <= trailCount; i++) {
+                    const trailX = ballX - (ballDX * (i / trailCount));
+                    const trailY = ballY - (ballDY * (i / trailCount));
+                    const alpha = 0.3 - (i * 0.08);
+                    const size = ballRadius * (1 - (i * 0.1));
+                    
+                    ctx.beginPath();
+                    ctx.arc(trailX, trailY, size, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(255, 215, 0, ${alpha})`;
+                    ctx.fill();
+                    ctx.closePath();
+                }
+            }
+            
+            // Draw the actual ball
             if (profileImage.complete) {
                 ctx.save();
                 ctx.beginPath();
@@ -348,6 +398,18 @@
                 ctx.clip();
                 ctx.drawImage(profileImage, ballX - ballRadius, ballY - ballRadius, ballRadius * 2, ballRadius * 2);
                 ctx.restore();
+                
+                // Add outer glow effect
+                ctx.beginPath();
+                ctx.arc(ballX, ballY, ballRadius + 2, 0, Math.PI * 2);
+                const glow = ctx.createRadialGradient(
+                    ballX, ballY, ballRadius,
+                    ballX, ballY, ballRadius + 5
+                );
+                glow.addColorStop(0, 'rgba(255, 215, 0, 0.5)');
+                glow.addColorStop(1, 'rgba(255, 215, 0, 0)');
+                ctx.fillStyle = glow;
+                ctx.fill();
             } else {
                 ctx.beginPath();
                 ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2);
@@ -355,6 +417,10 @@
                 ctx.fill();
                 ctx.closePath();
             }
+            
+            // Store current position for next frame's trail
+            previousBallX = ballX;
+            previousBallY = ballY;
         }
 
         // Draw the seeds with Superseed black-bg texture
@@ -411,9 +477,8 @@
                 ctx.fillText('Time: ' + formatTime(gameTimer), canvas.width / 1 - 240, 20);
                 
                 // Calculate and display ball speed as percentage of original
-                const originalSpeed = 4; // Starting speed
-                const currentSpeed = Math.sqrt(ballDX * ballDX + ballDY * ballDY);
-                const speedPercent = Math.floor((currentSpeed / originalSpeed) * 100);
+                const baseSpeed = 4; // Starting speed
+                const speedPercent = Math.floor((ballSpeed / baseSpeed) * 100);
                 
                 ctx.fillText('Ball Speed: ' + speedPercent + '%', canvas.width / 2 - 270, 20);
             } else if (gameState === 'start') {
@@ -575,7 +640,7 @@
             }
         }
 
-        // Update the collision detection function to add speed boosts
+        // Improved collision detection for more realistic physics and consistent speed increases
         function collisionDetection() {
             for (let c = 0; c < seedColumnCount; c++) {
                 for (let r = 0; r < seedRowCount; r++) {
@@ -596,11 +661,13 @@
                             let dx = closestX - ballX;
                             let dy = closestY - ballY;
                             
-                            // Reflect ball based on which side was hit
+                            // Reflect ball based on which side was hit - more accurate bouncing
                             if (Math.abs(dx) > Math.abs(dy)) {
-                                ballDX = -ballDX; // Hit left or right side
+                                // Hit left or right side - preserve some of the vertical momentum
+                                ballDX = -ballDX;
                             } else {
-                                ballDY = -ballDY; // Hit top or bottom
+                                // Hit top or bottom - preserve some of the horizontal momentum
+                                ballDY = -ballDY;
                             }
                             
                             // Mark the seed as broken
@@ -609,14 +676,26 @@
                             gameStatistics.blocksDestroyed++;
                             breakSound.play();
                             
-                            // 40% chance to increase ball speed
+                            // Controlled speed increase - 40% chance
                             if (Math.random() < 0.4) {
-                                // Random speed increase between 1-9%
-                                const speedIncrease = 1 + (Math.random() * 0.09 + 0.01);
+                                // Increase speed by 2-7% consistently
+                                const speedIncrease = 1.02 + (Math.random() * 0.05);
                                 
-                                // Increase ball speed (both horizontal and vertical)
-                                ballDX *= speedIncrease;
-                                ballDY *= speedIncrease;
+                                // Get current ball speed
+                                const currentSpeed = Math.sqrt(ballDX * ballDX + ballDY * ballDY);
+                                
+                                // Calculate new speed while maintaining direction
+                                const newSpeed = currentSpeed * speedIncrease;
+                                
+                                // Calculate the ratio to multiply both components
+                                const speedRatio = newSpeed / currentSpeed;
+                                
+                                // Apply the new speed while maintaining direction
+                                ballDX *= speedRatio;
+                                ballDY *= speedRatio;
+                                
+                                // Update overall ball speed for UI
+                                ballSpeed = newSpeed;
                                 
                                 // Visual feedback for speed boost
                                 showSpeedBoost();
@@ -793,10 +872,14 @@
             lives = 3;
             score = 0;
             paddleX = (canvas.width - paddleWidth) / 2;
+            previousPaddleX = paddleX;
             ballX = canvas.width / 2;
             ballY = canvas.height - paddleHeight - 30; // Position above paddle
+            previousBallX = ballX;
+            previousBallY = ballY;
             ballDX = 4 * (Math.random() > 0.5 ? 1 : -1); // Random horizontal direction
             ballDY = -4; // Always move upward at start
+            ballSpeed = 4; // Reset to base speed
             powerUp = null;
             gameTimer = 0;
             gameStartTime = Date.now();
@@ -938,7 +1021,7 @@
                 </div>
                 
                 <div style="margin-top: 20px;">
-                    <button id="startGameButton" style="padding: 12px 24px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 18px; position: relative; z-index: 1001;">START GAME</button>
+                    <button id="startGameButton" style="padding: 12px 24px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 18px; position: relative; z-index: 1001;">PRESS THE SPACEBAR TO START PLAYING</button>
                 </div>
             `;
             
@@ -1006,21 +1089,13 @@
                     ballDY = -ballDY;
                     bounceSound.play();
                 } 
-                // Ball paddle collision
+                // Ball paddle collision with improved physics
                 else if (ballY + ballRadius > canvas.height - paddleHeight - 10 && 
                          ballY + ballDY < canvas.height && 
                          ballX > paddleX && 
                          ballX < paddleX + paddleWidth) {
                     
-                    // Adjust angle based on where ball hits paddle
-                    const hitPosition = (ballX - paddleX) / paddleWidth;
-                    const angleMultiplier = 2 * (hitPosition - 0.5);
-                    
-                    const speed = Math.sqrt(ballDX * ballDX + ballDY * ballDY);
-                    ballDX = speed * angleMultiplier * 0.8;
-                    ballDY = -Math.abs(ballDY);
-                    
-                    bounceSound.play();
+                    handleBallPaddleCollision();
                 }
                 // Ball falls below screen - lose life
                 else if (ballY + ballDY > canvas.height - ballRadius) {
