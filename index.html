@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="shortcut icon" href="https://pbs.twimg.com/profile_images/1874884711790653440/c_y1WmIZ_400x400.jpg">
     <title>Seed Harvester Breakout - A Superseed Game</title>
     <style>
         canvas {
@@ -420,9 +421,24 @@
                 const currentSpeed = Math.sqrt(ballDX * ballDX + ballDY * ballDY);
                 const speedPercent = Math.floor((currentSpeed / originalSpeed) * 100);
                 
+                // Create a color gradient based on speed
+                let speedColor = '#FFFFFF'; // Default white
+                if (speedPercent >= 175) {
+                    speedColor = '#FF4500'; // Orange-Red for very fast
+                } else if (speedPercent >= 140) {
+                    speedColor = '#FFA500'; // Orange for fast
+                } else if (speedPercent >= 110) {
+                    speedColor = '#FFD700'; // Gold for slightly faster
+                }
+                
+                // Display speed with color coding
+                ctx.fillStyle = speedColor;
                 ctx.fillText('Ball Speed: ' + speedPercent + '%', canvas.width / 2 - 270, 20);
+                ctx.fillStyle = '#FFFFFF'; // Reset color for other UI elements
             } else if (gameState === 'start') {
                 ctx.fillText('Time: 00:00', canvas.width / 2 - 40, 20);
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillText('Ball Speed: 100%', canvas.width / 2 - 270, 20);
             }
         }
 
